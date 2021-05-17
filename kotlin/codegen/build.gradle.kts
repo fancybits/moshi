@@ -22,42 +22,55 @@ plugins {
   kotlin("jvm")
   kotlin("kapt")
   id("com.vanniktech.maven.publish")
-  id("com.github.johnrengelman.shadow") version "5.2.0"
+  id("com.github.johnrengelman.shadow") version "7.0.0"
 }
 
 tasks.withType<KotlinCompile>().configureEach {
   kotlinOptions {
     jvmTarget = "1.8"
-    freeCompilerArgs = listOf(
-      "-progressive",
+    @Suppress("SuspiciousCollectionReassignment")
+    freeCompilerArgs += listOf(
       "-Xopt-in=com.squareup.kotlinpoet.metadata.KotlinPoetMetadataPreview"
     )
   }
 }
 
+// To make Gradle happy
+java {
+  sourceCompatibility = JavaVersion.VERSION_1_8
+  targetCompatibility = JavaVersion.VERSION_1_8
+}
+
 val shade: Configuration = configurations.maybeCreate("compileShaded")
 configurations.getByName("compileOnly").extendsFrom(shade)
 dependencies {
-  implementation(project(":moshi"))
-  implementation(kotlin("reflect"))
+  // Use `api` because kapt will not resolve `runtime` dependencies without it, only `compile`
+  // https://youtrack.jetbrains.com/issue/KT-41702
+  api(project(":moshi"))
+  api(kotlin("reflect"))
   shade(Dependencies.Kotlin.metadata) {
     exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
   }
-  implementation(Dependencies.KotlinPoet.kotlinPoet)
+  api(Dependencies.KotlinPoet.kotlinPoet)
   shade(Dependencies.KotlinPoet.metadata) {
     exclude(group = "org.jetbrains.kotlin")
+    exclude(group = "com.squareup", module = "kotlinpoet")
   }
   shade(Dependencies.KotlinPoet.metadataSpecs) {
     exclude(group = "org.jetbrains.kotlin")
+    exclude(group = "com.squareup", module = "kotlinpoet")
   }
+  api(Dependencies.KotlinPoet.elementsClassInspector)
   shade(Dependencies.KotlinPoet.elementsClassInspector) {
     exclude(group = "org.jetbrains.kotlin")
+    exclude(group = "com.squareup", module = "kotlinpoet")
+    exclude(group = "com.google.guava")
   }
-  implementation(Dependencies.asm)
+  api(Dependencies.asm)
 
-  implementation(Dependencies.AutoService.annotations)
+  api(Dependencies.AutoService.annotations)
   kapt(Dependencies.AutoService.processor)
-  implementation(Dependencies.Incap.annotations)
+  api(Dependencies.Incap.annotations)
   kapt(Dependencies.Incap.processor)
 
   // Copy these again as they're not automatically included since they're shaded
@@ -65,10 +78,8 @@ dependencies {
   testImplementation(Dependencies.KotlinPoet.metadataSpecs)
   testImplementation(Dependencies.KotlinPoet.elementsClassInspector)
   testImplementation(Dependencies.Testing.junit)
-  testImplementation(Dependencies.Testing.assertj)
   testImplementation(Dependencies.Testing.truth)
   testImplementation(Dependencies.Testing.compileTesting)
-  testImplementation(Dependencies.okio2)
 }
 
 val relocateShadowJar = tasks.register<ConfigureShadowRelocation>("relocateShadowJar") {
@@ -91,21 +102,6 @@ val shadowJar = tasks.shadowJar.apply {
 }
 
 artifacts {
-  runtime(shadowJar)
+  runtimeOnly(shadowJar)
   archives(shadowJar)
-}
-
-// Shadow plugin doesn't natively support gradle metadata, so we have to tell the maven plugin where
-// to get a jar now.
-afterEvaluate {
-  configure<PublishingExtension> {
-    publications.withType<MavenPublication>().configureEach {
-      if (name == "pluginMaven") {
-        // This is to properly wire the shadow jar's gradle metadata and pom information
-        setArtifacts(artifacts.matching { it.classifier != "" })
-        // Ugly but artifact() doesn't support TaskProviders
-        artifact(shadowJar.get())
-      }
-    }
-  }
 }

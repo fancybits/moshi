@@ -14,18 +14,27 @@
  * limitations under the License.
  */
 
+import com.diffplug.gradle.spotless.JavaExtension
 import org.gradle.jvm.tasks.Jar
+import org.jetbrains.dokka.gradle.DokkaTask
+import org.jetbrains.kotlin.gradle.dsl.KotlinProjectExtension
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import java.net.URL
 
 buildscript {
   dependencies {
     classpath(kotlin("gradle-plugin", version = Dependencies.Kotlin.version))
+    // https://github.com/melix/japicmp-gradle-plugin/issues/36
+    classpath("com.google.guava:guava:28.2-jre")
   }
 }
 
 plugins {
-  id("com.vanniktech.maven.publish") version "0.12.0" apply false
-  id("org.jetbrains.dokka") version "0.10.1" apply false
-  id("com.diffplug.spotless") version "5.2.0"
+  id("com.vanniktech.maven.publish") version "0.14.2" apply false
+  id("org.jetbrains.dokka") version "1.4.32" apply false
+  id("com.diffplug.spotless") version "5.12.4"
+  id("ru.vyarus.animalsniffer") version "1.5.3" apply false
+  id("me.champeau.gradle.japicmp") version "0.2.9" apply false
 }
 
 spotless {
@@ -35,22 +44,59 @@ spotless {
     indentWithSpaces(2)
     endWithNewline()
   }
-  java {
-    googleJavaFormat("1.7")
-    target("**/*.java")
-    targetExclude("**/spotless.java")
-    // https://github.com/diffplug/spotless/issues/677
-//    licenseHeaderFile("spotless/spotless.java")
+  // GJF not compatible with JDK 15 yet
+  if (!JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_15)) {
+    val externalJavaFiles = arrayOf(
+      "**/ClassFactory.java",
+      "**/Iso8601Utils.java",
+      "**/JsonReader.java",
+      "**/JsonReaderPathTest.java",
+      "**/JsonReaderTest.java",
+      "**/JsonScope.java",
+      "**/JsonUtf8Reader.java",
+      "**/JsonUtf8ReaderPathTest.java",
+      "**/JsonUtf8ReaderTest.java",
+      "**/JsonUtf8ReaderTest.java",
+      "**/JsonUtf8Writer.java",
+      "**/JsonUtf8WriterTest.java",
+      "**/JsonWriter.java",
+      "**/JsonWriterPathTest.java",
+      "**/JsonWriterTest.java",
+      "**/LinkedHashTreeMap.java",
+      "**/LinkedHashTreeMapTest.java",
+      "**/PolymorphicJsonAdapterFactory.java",
+      "**/RecursiveTypesResolveTest.java",
+      "**/Types.java",
+      "**/TypesTest.java"
+    )
+    val configureCommonJavaFormat: JavaExtension.() -> Unit = {
+      googleJavaFormat("1.7")
+    }
+    java {
+      configureCommonJavaFormat()
+      target("**/*.java")
+      targetExclude(
+        "**/spotless.java",
+        "**/build/**",
+        *externalJavaFiles
+      )
+      licenseHeaderFile("spotless/spotless.java")
+    }
+    format("externalJava", JavaExtension::class.java) {
+      // These don't use our spotless config for header files since we don't want to overwrite the
+      // existing copyright headers.
+      configureCommonJavaFormat()
+      target(*externalJavaFiles)
+    }
   }
   kotlin {
     ktlint(Dependencies.ktlintVersion).userData(mapOf("indent_size" to "2"))
     target("**/*.kt")
     trimTrailingWhitespace()
     endWithNewline()
-    // https://github.com/diffplug/spotless/issues/677
-//    licenseHeaderFile("spotless/spotless.kt")
-//      .updateYearWithLatest(false)
-//    targetExclude("**/Dependencies.kt", "**/spotless.kt")
+    licenseHeaderFile("spotless/spotless.kt")
+      .updateYearWithLatest(false)
+    targetExclude("**/Dependencies.kt", "**/spotless.kt", "**/build/**")
   }
   kotlinGradle {
     ktlint(Dependencies.ktlintVersion).userData(mapOf("indent_size" to "2"))
@@ -64,7 +110,7 @@ spotless {
 subprojects {
   repositories {
     mavenCentral()
-    @Suppress("UnstableApiUsage")
+    // Required for Dokka
     exclusiveContent {
       forRepository {
         maven {
@@ -73,15 +119,40 @@ subprojects {
         }
       }
       filter {
-        includeModule("org.jetbrains.dokka", "dokka-fatjar")
+        includeModule("org.jetbrains.kotlinx", "kotlinx-html-jvm")
+        includeGroup("org.jetbrains.dokka")
+        includeModule("org.jetbrains", "markdown")
       }
     }
   }
 
-  pluginManager.withPlugin("java-library") {
+  // Apply with "java" instead of just "java-library" so kotlin projects get it too
+  pluginManager.withPlugin("java") {
     configure<JavaPluginExtension> {
       sourceCompatibility = JavaVersion.VERSION_1_7
       targetCompatibility = JavaVersion.VERSION_1_7
+    }
+  }
+
+  pluginManager.withPlugin("ru.vyarus.animalsniffer") {
+    dependencies {
+      "compileOnly"(Dependencies.AnimalSniffer.annotations)
+      "signature"(Dependencies.AnimalSniffer.java7Signature)
+    }
+  }
+
+  pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
+    tasks.withType<KotlinCompile>().configureEach {
+      kotlinOptions {
+        @Suppress("SuspiciousCollectionReassignment")
+        freeCompilerArgs += listOf("-progressive")
+      }
+    }
+
+    configure<KotlinProjectExtension> {
+      if (project.name != "examples") {
+        explicitApi()
+      }
     }
   }
 
@@ -96,6 +167,19 @@ subprojects {
       tasks.withType<Jar>().configureEach {
         manifest {
           attributes("Automatic-Module-Name" to name)
+        }
+      }
+    }
+
+    if (name != "codegen" && pluginManager.hasPlugin("org.jetbrains.kotlin.jvm")) {
+      apply(plugin = "org.jetbrains.dokka")
+      tasks.named<DokkaTask>("dokkaHtml") {
+        outputDirectory.set(rootDir.resolve("docs/1.x"))
+        dokkaSourceSets.configureEach {
+          skipDeprecated.set(true)
+          externalDocumentationLink {
+            url.set(URL("https://square.github.io/okio/2.x/okio/"))
+          }
         }
       }
     }

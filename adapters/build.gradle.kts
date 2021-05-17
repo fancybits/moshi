@@ -14,9 +14,18 @@
  * limitations under the License.
  */
 
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
 plugins {
-  `java-library`
+  kotlin("jvm")
   id("com.vanniktech.maven.publish")
+  id("ru.vyarus.animalsniffer")
+}
+
+tasks.withType<KotlinCompile>().configureEach {
+  kotlinOptions {
+    jvmTarget = "1.6"
+  }
 }
 
 dependencies {
@@ -25,5 +34,5 @@ dependencies {
 
   testCompileOnly(Dependencies.jsr305)
   testImplementation(Dependencies.Testing.junit)
-  testImplementation(Dependencies.Testing.assertj)
+  testImplementation(Dependencies.Testing.truth)
 }

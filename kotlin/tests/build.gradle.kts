@@ -23,10 +23,10 @@ plugins {
 
 tasks.withType<KotlinCompile>().configureEach {
   kotlinOptions {
-    freeCompilerArgs = listOf(
+    @Suppress("SuspiciousCollectionReassignment")
+    freeCompilerArgs += listOf(
       "-Werror",
-      "-Xopt-in=kotlin.ExperimentalStdlibApi",
-      "-Xinline-classes"
+      "-Xopt-in=kotlin.ExperimentalStdlibApi"
     )
   }
 }
@@ -39,5 +39,4 @@ dependencies {
   testImplementation(Dependencies.Testing.junit)
   testImplementation(Dependencies.Testing.assertj)
   testImplementation(Dependencies.Testing.truth)
-  testImplementation(Dependencies.okio2)
 }

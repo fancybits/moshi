@@ -21,6 +21,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import javax.annotation.CheckReturnValue;
@@ -196,6 +197,8 @@ public abstract class JsonReader implements Closeable {
 
   /** True to throw a {@link JsonDataException} on any attempt to call {@link #skipValue()}. */
   boolean failOnUnknown;
+
+  private Map<Class<?>, Object> tags;
 
   /** Returns a new instance that reads UTF-8 encoded JSON from {@code source}. */
   @CheckReturnValue
@@ -423,6 +426,49 @@ public abstract class JsonReader implements Closeable {
   public abstract int nextInt() throws IOException;
 
   /**
+   * Returns the next value as a stream of UTF-8 bytes and consumes it.
+   *
+   * <p>The following program demonstrates how JSON bytes are returned from an enclosing stream as
+   * their original bytes, including their original whitespace:
+   *
+   * <pre>{@code
+   * String json = "{\"a\": [4,  5  ,6.0, {\"x\":7}, 8], \"b\": 9}";
+   * JsonReader reader = JsonReader.of(new Buffer().writeUtf8(json));
+   * reader.beginObject();
+   * assertThat(reader.nextName()).isEqualTo("a");
+   * try (BufferedSource bufferedSource = reader.valueSource()) {
+   *   assertThat(bufferedSource.readUtf8()).isEqualTo("[4,  5  ,6.0, {\"x\":7}, 8]");
+   * }
+   * assertThat(reader.nextName()).isEqualTo("b");
+   * assertThat(reader.nextInt()).isEqualTo(9);
+   * reader.endObject();
+   * }</pre>
+   *
+   * <p>This reads an entire value: composite objects like arrays and objects are returned in their
+   * entirety. The stream starts with the first character of the value (typically {@code [}, <code>{
+   * </code>, or {@code "}) and ends with the last character of the object (typically {@code ]},
+   * <code>}</code>, or {@code "}).
+   *
+   * <p>The returned source may not be used after any other method on this {@code JsonReader} is
+   * called. For example, the following code crashes with an exception:
+   *
+   * <pre>{@code
+   * JsonReader reader = ...
+   * reader.beginArray();
+   * BufferedSource source = reader.valueSource();
+   * reader.endArray();
+   * source.readUtf8(); // Crash!
+   * }</pre>
+   *
+   * <p>The returned bytes are not validated. This method assumes the stream is well-formed JSON and
+   * only attempts to find the value's boundary in the byte stream. It is the caller's
+   * responsibility to check that the returned byte stream is a valid JSON value.
+   *
+   * <p>Closing the returned source <strong>does not</strong> close this reader.
+   */
+  public abstract BufferedSource nextSource() throws IOException;
+
+  /**
    * Skips the next value recursively. If it is an object or array, all nested elements are skipped.
    * This method is intended for use when the JSON token stream contains unrecognized or unhandled
    * values.
@@ -524,6 +570,27 @@ public abstract class JsonReader implements Closeable {
   @CheckReturnValue
   public final String getPath() {
     return JsonScope.getPath(stackSize, scopes, pathNames, pathIndices);
+  }
+
+  /** Returns the tag value for the given class key. */
+  @SuppressWarnings("unchecked")
+  @CheckReturnValue
+  public final @Nullable <T> T tag(Class<T> clazz) {
+    if (tags == null) {
+      return null;
+    }
+    return (T) tags.get(clazz);
+  }
+
+  /** Assigns the tag value using the given class key and value. */
+  public final <T> void setTag(Class<T> clazz, T value) {
+    if (!clazz.isAssignableFrom(value.getClass())) {
+      throw new IllegalArgumentException("Tag value must be of type " + clazz.getName());
+    }
+    if (tags == null) {
+      tags = new LinkedHashMap<>();
+    }
+    tags.put(clazz, value);
   }
 
   /**

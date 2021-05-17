@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *    https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,7 @@ package com.squareup.moshi.kotlin.codegen
 
 import com.google.auto.service.AutoService
 import com.squareup.kotlinpoet.AnnotationSpec
-import com.squareup.kotlinpoet.asClassName
+import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.classinspector.elements.ElementsClassInspector
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.kotlin.codegen.api.AdapterGenerator
@@ -46,9 +46,9 @@ import javax.tools.Diagnostic
  */
 @AutoService(Processor::class)
 @IncrementalAnnotationProcessor(ISOLATING)
-class JsonClassCodegenProcessor : AbstractProcessor() {
+public class JsonClassCodegenProcessor : AbstractProcessor() {
 
-  companion object {
+  public companion object {
     /**
      * This annotation processing argument can be specified to have a `@Generated` annotation
      * included in the generated code. It is not encouraged unless you need it for static analysis
@@ -58,11 +58,11 @@ class JsonClassCodegenProcessor : AbstractProcessor() {
      *   * `"javax.annotation.processing.Generated"` (JRE 9+)
      *   * `"javax.annotation.Generated"` (JRE <9)
      */
-    const val OPTION_GENERATED = "moshi.generated"
-    private val POSSIBLE_GENERATED_NAMES = setOf(
-      "javax.annotation.processing.Generated",
-      "javax.annotation.Generated"
-    )
+    public const val OPTION_GENERATED: String = "moshi.generated"
+    private val POSSIBLE_GENERATED_NAMES = arrayOf(
+      ClassName("javax.annotation.processing", "Generated"),
+      ClassName("javax.annotation", "Generated")
+    ).associateBy { it.canonicalName }
   }
 
   private lateinit var types: Types
@@ -71,22 +71,21 @@ class JsonClassCodegenProcessor : AbstractProcessor() {
   private lateinit var messager: Messager
   private lateinit var cachedClassInspector: MoshiCachedClassInspector
   private val annotation = JsonClass::class.java
-  private var generatedType: TypeElement? = null
+  private var generatedType: ClassName? = null
 
-  override fun getSupportedAnnotationTypes() = setOf(annotation.canonicalName)
+  override fun getSupportedAnnotationTypes(): Set<String> = setOf(annotation.canonicalName)
 
   override fun getSupportedSourceVersion(): SourceVersion = SourceVersion.latest()
 
-  override fun getSupportedOptions() = setOf(OPTION_GENERATED)
+  override fun getSupportedOptions(): Set<String> = setOf(OPTION_GENERATED)
 
   override fun init(processingEnv: ProcessingEnvironment) {
     super.init(processingEnv)
     generatedType = processingEnv.options[OPTION_GENERATED]?.let {
-      require(it in POSSIBLE_GENERATED_NAMES) {
+      POSSIBLE_GENERATED_NAMES[it] ?: error(
         "Invalid option value for $OPTION_GENERATED. Found $it, " +
           "allowable values are $POSSIBLE_GENERATED_NAMES."
-      }
-      processingEnv.elementUtils.getTypeElement(it)
+      )
     }
     this.types = processingEnv.typeUtils
     this.elements = processingEnv.elementUtils
@@ -117,7 +116,8 @@ class JsonClassCodegenProcessor : AbstractProcessor() {
           .prepare { spec ->
             spec.toBuilder()
               .apply {
-                generatedType?.asClassName()?.let { generatedClassName ->
+                @Suppress("DEPRECATION") // This is a Java type
+                generatedType?.let { generatedClassName ->
                   addAnnotation(
                     AnnotationSpec.builder(generatedClassName)
                       .addMember(

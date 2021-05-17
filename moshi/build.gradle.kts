@@ -14,10 +14,25 @@
  * limitations under the License.
  */
 
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
 plugins {
-  `java-library`
+  kotlin("jvm")
   id("com.vanniktech.maven.publish")
+  id("ru.vyarus.animalsniffer")
 }
+
+tasks.withType<KotlinCompile>()
+  .configureEach {
+    kotlinOptions {
+      jvmTarget = "1.6"
+
+      if (name.contains("test", true)) {
+        @Suppress("SuspiciousCollectionReassignment") // It's not suspicious
+        freeCompilerArgs += listOf("-Xopt-in=kotlin.ExperimentalStdlibApi")
+      }
+    }
+  }
 
 dependencies {
   compileOnly(Dependencies.jsr305)
@@ -25,5 +40,5 @@ dependencies {
 
   testCompileOnly(Dependencies.jsr305)
   testImplementation(Dependencies.Testing.junit)
-  testImplementation(Dependencies.Testing.assertj)
+  testImplementation(Dependencies.Testing.truth)
 }

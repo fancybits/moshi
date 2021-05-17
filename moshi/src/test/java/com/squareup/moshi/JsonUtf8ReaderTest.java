@@ -15,6 +15,7 @@
  */
 package com.squareup.moshi;
 
+import static com.google.common.truth.Truth.assertThat;
 import static com.squareup.moshi.JsonReader.Token.BEGIN_ARRAY;
 import static com.squareup.moshi.JsonReader.Token.BEGIN_OBJECT;
 import static com.squareup.moshi.JsonReader.Token.BOOLEAN;
@@ -27,7 +28,6 @@ import static com.squareup.moshi.JsonReader.Token.STRING;
 import static com.squareup.moshi.TestUtil.MAX_DEPTH;
 import static com.squareup.moshi.TestUtil.newReader;
 import static com.squareup.moshi.TestUtil.repeat;
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
@@ -35,8 +35,10 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.util.Arrays;
 import okio.Buffer;
+import okio.BufferedSource;
 import okio.ForwardingSource;
 import okio.Okio;
+import okio.Source;
 import org.junit.Ignore;
 import org.junit.Test;
 
@@ -1031,7 +1033,7 @@ public final class JsonUtf8ReaderTest {
       reader1.peek();
       fail();
     } catch (JsonEncodingException expected) {
-      assertThat(expected).hasMessage(message);
+      assertThat(expected).hasMessageThat().isEqualTo(message);
     }
 
     // Also validate that it works when skipping.
@@ -1043,7 +1045,7 @@ public final class JsonUtf8ReaderTest {
       reader2.peek();
       fail();
     } catch (JsonEncodingException expected) {
-      assertThat(expected).hasMessage(message);
+      assertThat(expected).hasMessageThat().isEqualTo(message);
     }
   }
 
@@ -1062,7 +1064,7 @@ public final class JsonUtf8ReaderTest {
       reader.peek();
       fail();
     } catch (JsonEncodingException expected) {
-      assertThat(expected).hasMessage("Expected value at path $[1].a[2]");
+      assertThat(expected).hasMessageThat().isEqualTo("Expected value at path $[1].a[2]");
     }
   }
 
@@ -1077,7 +1079,7 @@ public final class JsonUtf8ReaderTest {
       reader.peek();
       fail();
     } catch (JsonEncodingException expected) {
-      assertThat(expected).hasMessage("Expected value at path $.null[1]");
+      assertThat(expected).hasMessageThat().isEqualTo("Expected value at path $.null[1]");
     }
   }
 
@@ -1125,7 +1127,9 @@ public final class JsonUtf8ReaderTest {
       reader.beginArray();
       fail();
     } catch (JsonDataException expected) {
-      assertThat(expected).hasMessage("Nesting too deep at $" + repeat("[0]", MAX_DEPTH));
+      assertThat(expected)
+          .hasMessageThat()
+          .isEqualTo("Nesting too deep at $" + repeat("[0]", MAX_DEPTH));
     }
   }
 
@@ -1147,7 +1151,9 @@ public final class JsonUtf8ReaderTest {
       reader.beginObject();
       fail();
     } catch (JsonDataException expected) {
-      assertThat(expected).hasMessage("Nesting too deep at $" + repeat(".a", MAX_DEPTH));
+      assertThat(expected)
+          .hasMessageThat()
+          .isEqualTo("Nesting too deep at $" + repeat(".a", MAX_DEPTH));
     }
   }
 
@@ -1338,7 +1344,7 @@ public final class JsonUtf8ReaderTest {
       reader.nextString();
       fail();
     } catch (JsonEncodingException expected) {
-      assertThat(expected).hasMessage("Invalid escape sequence: \\i at path $[0]");
+      assertThat(expected).hasMessageThat().isEqualTo("Invalid escape sequence: \\i at path $[0]");
     }
   }
 
@@ -1384,5 +1390,104 @@ public final class JsonUtf8ReaderTest {
         throw new AssertionError();
       }
     }
+  }
+
+  @Test
+  public void nextSourceObject_withWhitespace() throws IOException {
+    // language=JSON
+    JsonReader reader = newReader("{\n  \"a\": {\n    \"b\": 2,\n    \"c\": 3\n  }\n}");
+    reader.beginObject();
+    assertThat(reader.nextName()).isEqualTo("a");
+    try (BufferedSource valueSource = reader.nextSource()) {
+      assertThat(valueSource.readUtf8()).isEqualTo("{\n    \"b\": 2,\n    \"c\": 3\n  }");
+    }
+  }
+
+  @Test
+  public void nextSourceLong_WithWhitespace() throws IOException {
+    // language=JSON
+    JsonReader reader = newReader("{\n  \"a\": -2\n}");
+    reader.beginObject();
+    assertThat(reader.nextName()).isEqualTo("a");
+    try (BufferedSource valueSource = reader.nextSource()) {
+      assertThat(valueSource.readUtf8()).isEqualTo("-2");
+    }
+  }
+
+  /**
+   * Confirm that {@link JsonReader#nextSource} doesn't load data from the underlying stream until
+   * its required by the caller. If the source is backed by a slow network stream, we want users to
+   * get data as it arrives.
+   *
+   * <p>Because we don't have a slow stream in this test, we just add bytes to our underlying stream
+   * immediately before they're needed.
+   */
+  @Test
+  public void nextSourceStreams() throws IOException {
+    Buffer stream = new Buffer();
+    stream.writeUtf8("[\"");
+
+    JsonReader reader = JsonReader.of(Okio.buffer((Source) stream));
+    reader.beginArray();
+    BufferedSource source = reader.nextSource();
+    assertThat(source.readUtf8(1)).isEqualTo("\"");
+    stream.writeUtf8("hello");
+    assertThat(source.readUtf8(5)).isEqualTo("hello");
+    stream.writeUtf8("world");
+    assertThat(source.readUtf8(5)).isEqualTo("world");
+    stream.writeUtf8("\"");
+    assertThat(source.readUtf8(1)).isEqualTo("\"");
+    stream.writeUtf8("]");
+    assertThat(source.exhausted()).isTrue();
+    reader.endArray();
+  }
+
+  @Test
+  public void nextSourceObjectAfterSelect() throws IOException {
+    // language=JSON
+    JsonReader reader = newReader("[\"p\u0065psi\"]");
+    reader.beginArray();
+    assertThat(reader.selectName(JsonReader.Options.of("coke"))).isEqualTo(-1);
+    try (BufferedSource valueSource = reader.nextSource()) {
+      assertThat(valueSource.readUtf8()).isEqualTo("\"pepsi\""); // not the original characters!
+    }
+  }
+
+  @Test
+  public void nextSourceObjectAfterPromoteNameToValue() throws IOException {
+    // language=JSON
+    JsonReader reader = newReader("{\"a\":true}");
+    reader.beginObject();
+    reader.promoteNameToValue();
+    try (BufferedSource valueSource = reader.nextSource()) {
+      assertThat(valueSource.readUtf8()).isEqualTo("\"a\"");
+    }
+    assertThat(reader.nextBoolean()).isEqualTo(true);
+    reader.endObject();
+  }
+
+  @Test
+  public void nextSourcePath() throws IOException {
+    // language=JSON
+    JsonReader reader = newReader("{\"a\":true,\"b\":[],\"c\":false}");
+    reader.beginObject();
+
+    assertThat(reader.nextName()).isEqualTo("a");
+    assertThat(reader.getPath()).isEqualTo("$.a");
+    assertThat(reader.nextBoolean()).isTrue();
+    assertThat(reader.getPath()).isEqualTo("$.a");
+
+    assertThat(reader.nextName()).isEqualTo("b");
+    try (BufferedSource valueSource = reader.nextSource()) {
+      assertThat(reader.getPath()).isEqualTo("$.b");
+      assertThat(valueSource.readUtf8()).isEqualTo("[]");
+    }
+    assertThat(reader.getPath()).isEqualTo("$.b");
+
+    assertThat(reader.nextName()).isEqualTo("c");
+    assertThat(reader.getPath()).isEqualTo("$.c");
+    assertThat(reader.nextBoolean()).isFalse();
+    assertThat(reader.getPath()).isEqualTo("$.c");
+    reader.endObject();
   }
 }

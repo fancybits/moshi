@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *    https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,10 +18,12 @@ package com.squareup.moshi.kotlin.codegen
 import com.squareup.kotlinpoet.AnnotationSpec
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.KModifier
+import com.squareup.kotlinpoet.LambdaTypeName
 import com.squareup.kotlinpoet.ParameterizedTypeName
 import com.squareup.kotlinpoet.TypeName
 import com.squareup.kotlinpoet.TypeSpec
 import com.squareup.kotlinpoet.TypeVariableName
+import com.squareup.kotlinpoet.WildcardTypeName
 import com.squareup.kotlinpoet.asClassName
 import com.squareup.kotlinpoet.asTypeName
 import com.squareup.kotlinpoet.metadata.ImmutableKmConstructor
@@ -45,7 +47,7 @@ import com.squareup.moshi.kotlin.codegen.api.TargetConstructor
 import com.squareup.moshi.kotlin.codegen.api.TargetParameter
 import com.squareup.moshi.kotlin.codegen.api.TargetProperty
 import com.squareup.moshi.kotlin.codegen.api.TargetType
-import com.squareup.moshi.kotlin.codegen.api.mapTypes
+import com.squareup.moshi.kotlin.codegen.api.deepCopy
 import com.squareup.moshi.kotlin.codegen.api.rawType
 import java.lang.annotation.ElementType
 import java.lang.annotation.Retention
@@ -61,6 +63,7 @@ import javax.lang.model.type.DeclaredType
 import javax.lang.model.util.Elements
 import javax.lang.model.util.Types
 import javax.tools.Diagnostic.Kind.ERROR
+import javax.tools.Diagnostic.Kind.WARNING
 
 private val JSON_QUALIFIER = JsonQualifier::class.java
 private val JSON = Json::class.asClassName()
@@ -93,7 +96,7 @@ internal fun primaryConstructor(
       index = index,
       type = parameter.type,
       hasDefault = parameter.defaultValue != null,
-      qualifiers = parameter.annotations.qualifiers(elements),
+      qualifiers = parameter.annotations.qualifiers(messager, elements),
       jsonName = parameter.annotations.jsonName()
     )
   }
@@ -231,6 +234,7 @@ internal fun targetType(
   val resolvedTypes = mutableListOf<ResolvedTypeMapping>()
   val superTypes = appliedType.supertypes(types)
     .filterNot { supertype ->
+      @Suppress("DEPRECATION") // Appropriate in this case
       supertype.element.asClassName() == OBJECT_CLASS || // Don't load properties for java.lang.Object.
         supertype.element.kind != ElementKind.CLASS // Don't load properties for interface types.
     }
@@ -270,6 +274,7 @@ internal fun targetType(
         val superSuperClass = supertype.element.superclass as DeclaredType
 
         // Convert to an element and back to wipe the typed generics off of this
+        @Suppress("DEPRECATION") // Appropriate in this case
         val untyped = superSuperClass.asElement().asType().asTypeName() as ParameterizedTypeName
         resolvedTypes += ResolvedTypeMapping(
           target = untyped.rawType,
@@ -285,6 +290,7 @@ internal fun targetType(
     }
 
   for ((localAppliedType, supertypeApi) in superTypes.entries) {
+    @Suppress("DEPRECATION") // Appropriate in this case
     val appliedClassName = localAppliedType.element.asClassName()
     val supertypeProperties = declaredProperties(
       constructor = constructor,
@@ -311,6 +317,8 @@ internal fun targetType(
       .any { it.isInternal }
     if (forceInternal) KModifier.INTERNAL else visibility
   }
+
+  @Suppress("DEPRECATION") // Appropriate in this case
   return TargetType(
     typeName = element.asType().asTypeName(),
     constructor = constructor,
@@ -449,7 +457,7 @@ internal fun TargetProperty.generator(
   }
 
   // Merge parameter and property annotations
-  val qualifiers = parameter?.qualifiers.orEmpty() + propertySpec.annotations.qualifiers(elements)
+  val qualifiers = parameter?.qualifiers.orEmpty() + propertySpec.annotations.qualifiers(messager, elements)
   for (jsonQualifier in qualifiers) {
     val qualifierRawType = jsonQualifier.typeName.rawType()
     // Check Java types since that covers both Java and Kotlin annotations.
@@ -485,10 +493,17 @@ internal fun TargetProperty.generator(
   )
 }
 
-private fun List<AnnotationSpec>?.qualifiers(elements: Elements): Set<AnnotationSpec> {
+private fun List<AnnotationSpec>?.qualifiers(
+  messager: Messager,
+  elements: Elements
+): Set<AnnotationSpec> {
   if (this == null) return setOf()
   return filterTo(mutableSetOf()) {
-    elements.getTypeElement(it.typeName.toString()).getAnnotation(JSON_QUALIFIER) != null
+    val typeElement: TypeElement? = elements.getTypeElement(it.typeName.rawType().canonicalName)
+    if (typeElement == null) {
+      messager.printMessage(WARNING, "Could not get the TypeElement of $it")
+    }
+    typeElement?.getAnnotation(JSON_QUALIFIER) != null
   }
 }
 
@@ -509,19 +524,26 @@ private fun String.escapeDollarSigns(): String {
 }
 
 internal fun TypeName.unwrapTypeAlias(): TypeName {
-  return mapTypes<ClassName> {
-    tag<TypeNameAliasTag>()?.type?.let { unwrappedType ->
-      // If any type is nullable, then the whole thing is nullable
-      var isAnyNullable = isNullable
-      // Keep track of all annotations across type levels. Sort them too for consistency.
-      val runningAnnotations = TreeSet<AnnotationSpec>(compareBy { it.toString() }).apply {
-        addAll(annotations)
-      }
-      val nestedUnwrappedType = unwrappedType.unwrapTypeAlias()
-      runningAnnotations.addAll(nestedUnwrappedType.annotations)
-      isAnyNullable = isAnyNullable || nestedUnwrappedType.isNullable
-      nestedUnwrappedType.copy(nullable = isAnyNullable, annotations = runningAnnotations.toList())
+  return when (this) {
+    is ClassName -> {
+      tag<TypeNameAliasTag>()?.type?.let { unwrappedType ->
+        // If any type is nullable, then the whole thing is nullable
+        var isAnyNullable = isNullable
+        // Keep track of all annotations across type levels. Sort them too for consistency.
+        val runningAnnotations = TreeSet<AnnotationSpec>(compareBy { it.toString() }).apply {
+          addAll(annotations)
+        }
+        val nestedUnwrappedType = unwrappedType.unwrapTypeAlias()
+        runningAnnotations.addAll(nestedUnwrappedType.annotations)
+        isAnyNullable = isAnyNullable || nestedUnwrappedType.isNullable
+        nestedUnwrappedType.copy(nullable = isAnyNullable, annotations = runningAnnotations.toList())
+      } ?: this
     }
+    is ParameterizedTypeName -> deepCopy(TypeName::unwrapTypeAlias)
+    is TypeVariableName -> deepCopy(transform = TypeName::unwrapTypeAlias)
+    is WildcardTypeName -> deepCopy(TypeName::unwrapTypeAlias)
+    is LambdaTypeName -> deepCopy(TypeName::unwrapTypeAlias)
+    else -> throw UnsupportedOperationException("Type '${javaClass.simpleName}' is illegal. Only classes, parameterized types, wildcard types, or type variables are allowed.")
   }
 }
 

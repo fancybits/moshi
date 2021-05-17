@@ -1,5 +1,21 @@
+/*
+ * Copyright (C) 2020 Square, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.squareup.moshi.kotlin
 
+import com.google.common.truth.Truth.assertThat
 import com.squareup.moshi.FromJson
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonAdapter
@@ -8,10 +24,10 @@ import com.squareup.moshi.JsonClass
 import com.squareup.moshi.JsonDataException
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.ToJson
-import com.squareup.moshi.Types
+import com.squareup.moshi.adapter
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
-import com.squareup.moshi.kotlin.reflect.adapter
-import org.assertj.core.api.Assertions.assertThat
+import com.squareup.moshi.rawType
+import com.squareup.moshi.supertypeOf
 import org.intellij.lang.annotations.Language
 import org.junit.Assert.fail
 import org.junit.Test
@@ -47,13 +63,13 @@ class DualKotlinTest(useReflection: Boolean) {
           object : Factory {
             override fun create(
               type: Type,
-              annotations: MutableSet<out Annotation>,
+              annotations: Set<Annotation>,
               moshi: Moshi
             ): JsonAdapter<*>? {
               // Prevent falling back to generated adapter lookup
-              val rawType = Types.getRawType(type)
+              val rawType = type.rawType
               val metadataClass = Class.forName("kotlin.Metadata") as Class<out Annotation>
-              check(!rawType.isAnnotationPresent(metadataClass)) {
+              check(rawType.isEnum || !rawType.isAnnotationPresent(metadataClass)) {
                 "Unhandled Kotlin type in reflective test! $rawType"
               }
               return moshi.nextAdapter<Any>(this, type, annotations)
@@ -72,7 +88,7 @@ class DualKotlinTest(useReflection: Boolean) {
       jsonAdapter.fromJson("""{"a":4}""")
       fail()
     } catch (expected: JsonDataException) {
-      assertThat(expected).hasMessage("Required value 'b' missing at $")
+      assertThat(expected).hasMessageThat().isEqualTo("Required value 'b' missing at $")
     }
   }
 
@@ -87,7 +103,7 @@ class DualKotlinTest(useReflection: Boolean) {
       jsonAdapter.fromJson("""{"a":4}""")
       fail()
     } catch (expected: JsonDataException) {
-      assertThat(expected).hasMessage("Required value 'b' (JSON name 'bPrime') missing at \$")
+      assertThat(expected).hasMessageThat().isEqualTo("Required value 'b' (JSON name 'bPrime') missing at \$")
     }
   }
 
@@ -102,7 +118,7 @@ class DualKotlinTest(useReflection: Boolean) {
       jsonAdapter.fromJson("{\"a\":null}")
       fail()
     } catch (expected: JsonDataException) {
-      assertThat(expected).hasMessage("Non-null value 'a' was null at \$.a")
+      assertThat(expected).hasMessageThat().isEqualTo("Non-null value 'a' was null at \$.a")
     }
   }
 
@@ -123,7 +139,7 @@ class DualKotlinTest(useReflection: Boolean) {
       jsonAdapter.fromJson("{\"a\":\"hello\"}")
       fail()
     } catch (expected: JsonDataException) {
-      assertThat(expected).hasMessage("Non-null value 'a' was null at \$.a")
+      assertThat(expected).hasMessageThat().isEqualTo("Non-null value 'a' was null at \$.a")
     }
   }
 
@@ -140,7 +156,7 @@ class DualKotlinTest(useReflection: Boolean) {
       jsonAdapter.fromJson("{\"aPrime\":null}")
       fail()
     } catch (expected: JsonDataException) {
-      assertThat(expected).hasMessage("Non-null value 'a' (JSON name 'aPrime') was null at \$.aPrime")
+      assertThat(expected).hasMessageThat().isEqualTo("Non-null value 'a' (JSON name 'aPrime') was null at \$.aPrime")
     }
   }
 
@@ -161,7 +177,7 @@ class DualKotlinTest(useReflection: Boolean) {
       jsonAdapter.fromJson("{\"aPrime\":\"hello\"}")
       fail()
     } catch (expected: JsonDataException) {
-      assertThat(expected).hasMessage("Non-null value 'a' (JSON name 'aPrime') was null at \$.aPrime")
+      assertThat(expected).hasMessageThat().isEqualTo("Non-null value 'a' (JSON name 'aPrime') was null at \$.aPrime")
     }
   }
 
@@ -178,7 +194,7 @@ class DualKotlinTest(useReflection: Boolean) {
       jsonAdapter.fromJson("{\"a\":null}")
       fail()
     } catch (expected: JsonDataException) {
-      assertThat(expected).hasMessage("Non-null value 'a' was null at \$.a")
+      assertThat(expected).hasMessageThat().isEqualTo("Non-null value 'a' was null at \$.a")
     }
   }
 
@@ -199,7 +215,7 @@ class DualKotlinTest(useReflection: Boolean) {
       jsonAdapter.fromJson("{\"a\":\"hello\"}")
       fail()
     } catch (expected: JsonDataException) {
-      assertThat(expected).hasMessage("Non-null value 'a' was null at \$.a")
+      assertThat(expected).hasMessageThat().isEqualTo("Non-null value 'a' was null at \$.a")
     }
   }
 
@@ -269,9 +285,9 @@ class DualKotlinTest(useReflection: Boolean) {
   }
 
   @Test fun inlineClass() {
-    val adapter = moshi.adapter<InlineClass>()
+    val adapter = moshi.adapter<ValueClass>()
 
-    val inline = InlineClass(5)
+    val inline = ValueClass(5)
 
     val expectedJson =
       """{"i":5}"""
@@ -284,12 +300,12 @@ class DualKotlinTest(useReflection: Boolean) {
   }
 
   @JsonClass(generateAdapter = true)
-  data class InlineConsumer(val inline: InlineClass)
+  data class InlineConsumer(val inline: ValueClass)
 
   @Test fun inlineClassConsumer() {
     val adapter = moshi.adapter<InlineConsumer>()
 
-    val consumer = InlineConsumer(InlineClass(23))
+    val consumer = InlineConsumer(ValueClass(23))
 
     @Language("JSON")
     val expectedJson =
@@ -431,7 +447,7 @@ class DualKotlinTest(useReflection: Boolean) {
   @Test fun typeAliasUnwrapping() {
     val adapter = moshi
       .newBuilder()
-      .add(Types.supertypeOf(Int::class.javaObjectType), moshi.adapter<Int>())
+      .add(supertypeOf<Int>(), moshi.adapter<Int>())
       .build()
       .adapter<TypeAliasUnwrapping>()
 
@@ -570,6 +586,33 @@ class DualKotlinTest(useReflection: Boolean) {
 
   @JsonClass(generateAdapter = true)
   data class OutDeclaration<out T>(val input: T)
+
+  // Regression test for https://github.com/square/moshi/issues/1244
+  @Test fun backwardReferencingTypeVarsAndIntersectionTypes() {
+    val adapter = moshi.adapter<IntersectionTypes<IntersectionTypesEnum>>()
+
+    @Language("JSON")
+    val testJson =
+      """{"value":"VALUE"}"""
+
+    val instance = IntersectionTypes(IntersectionTypesEnum.VALUE)
+    assertThat(adapter.serializeNulls().toJson(instance))
+      .isEqualTo(testJson)
+
+    val result = adapter.fromJson(testJson)!!
+    assertThat(result).isEqualTo(instance)
+  }
+
+  interface IntersectionTypeInterface<E : Enum<E>>
+
+  enum class IntersectionTypesEnum : IntersectionTypeInterface<IntersectionTypesEnum> {
+    VALUE
+  }
+
+  @JsonClass(generateAdapter = true)
+  data class IntersectionTypes<E>(
+    val value: E
+  ) where E : Enum<E>, E : IntersectionTypeInterface<E>
 }
 
 typealias TypeAlias = Int
@@ -579,9 +622,10 @@ typealias GenericTypeAlias = List<out GenericClass<in TypeAlias>?>?
 @JsonClass(generateAdapter = true)
 data class GenericClass<T>(val value: T)
 
-// Has to be outside since inline classes are only allowed on top level
+// Has to be outside since value classes are only allowed on top level
+@JvmInline
 @JsonClass(generateAdapter = true)
-inline class InlineClass(val i: Int)
+value class ValueClass(val i: Int)
 
 typealias A = Int
 typealias NullableA = A?

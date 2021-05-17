@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *    https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,6 +15,7 @@
  */
 package com.squareup.moshi.kotlin.codegen
 
+import com.google.common.truth.Truth.assertThat
 import com.squareup.moshi.FromJson
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonAdapter
@@ -25,10 +26,10 @@ import com.squareup.moshi.JsonReader
 import com.squareup.moshi.JsonWriter
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.ToJson
-import com.squareup.moshi.Types
+import com.squareup.moshi.adapter
 import com.squareup.moshi.internal.NullSafeJsonAdapter
-import com.squareup.moshi.kotlin.reflect.adapter
-import org.assertj.core.api.Assertions.assertThat
+import com.squareup.moshi.kotlin.codegen.annotation.UppercaseInAnnotationPackage
+import com.squareup.moshi.kotlin.codegen.annotation.UppercaseInAnnotationPackageJsonAdapter
 import org.intellij.lang.annotations.Language
 import org.junit.Assert.assertNull
 import org.junit.Assert.fail
@@ -177,7 +178,7 @@ class GeneratedAdaptersTest {
       """{"data":[null,"why"]}"""
 
     val instance = adapter.fromJson(json)!!
-    assertThat(instance.data).containsExactly(null, "why")
+    assertThat(instance.data).asList().containsExactly(null, "why").inOrder()
     assertThat(adapter.toJson(instance)).isEqualTo(json)
   }
 
@@ -193,7 +194,7 @@ class GeneratedAdaptersTest {
       """{"ints":[0,1]}"""
 
     val instance = adapter.fromJson(json)!!
-    assertThat(instance.ints).containsExactly(0, 1)
+    assertThat(instance.ints).asList().containsExactly(0, 1).inOrder()
     assertThat(adapter.toJson(instance)).isEqualTo(json)
   }
 
@@ -219,7 +220,7 @@ class GeneratedAdaptersTest {
       adapter.fromJson(invalidJson)
       fail("The invalid json should have failed!")
     } catch (e: JsonDataException) {
-      assertThat(e).hasMessageContaining("foo")
+      assertThat(e).hasMessageThat().contains("foo")
     }
   }
 
@@ -299,13 +300,7 @@ class GeneratedAdaptersTest {
 
   @Test
   fun nullableTypeParams() {
-    val adapter = moshi.adapter<NullableTypeParams<Int>>(
-      Types.newParameterizedTypeWithOwner(
-        GeneratedAdaptersTest::class.java,
-        NullableTypeParams::class.java,
-        Int::class.javaObjectType
-      )
-    )
+    val adapter = moshi.adapter<NullableTypeParams<Int>>()
     val nullSerializing = adapter.serializeNulls()
 
     val nullableTypeParams = NullableTypeParams(
@@ -517,6 +512,22 @@ class GeneratedAdaptersTest {
   @JsonClass(generateAdapter = true)
   class ConstructorParameterWithQualifier(@Uppercase(inFrench = true) var a: String, var b: String)
 
+  @Test fun constructorParameterWithQualifierInAnnotationPackage() {
+    val moshi = Moshi.Builder()
+      .add(UppercaseInAnnotationPackageJsonAdapter())
+      .build()
+    val jsonAdapter = moshi.adapter<ConstructorParameterWithQualifierInAnnotationPackage>()
+
+    val encoded = ConstructorParameterWithQualifierInAnnotationPackage("Android")
+    assertThat(jsonAdapter.toJson(encoded)).isEqualTo("""{"a":"ANDROID"}""")
+
+    val decoded = jsonAdapter.fromJson("""{"a":"Android"}""")!!
+    assertThat(decoded.a).isEqualTo("android")
+  }
+
+  @JsonClass(generateAdapter = true)
+  class ConstructorParameterWithQualifierInAnnotationPackage(@UppercaseInAnnotationPackage var a: String)
+
   @Test fun propertyWithQualifier() {
     val moshi = Moshi.Builder()
       .add(UppercaseJsonAdapter())
@@ -597,7 +608,7 @@ class GeneratedAdaptersTest {
 
   @Test fun multipleTransientConstructorParameters() {
     val moshi = Moshi.Builder().build()
-    val jsonAdapter = moshi.adapter(MultipleTransientConstructorParameters::class.java)
+    val jsonAdapter = moshi.adapter<MultipleTransientConstructorParameters>()
 
     val encoded = MultipleTransientConstructorParameters(3, 5, 7)
     assertThat(jsonAdapter.toJson(encoded)).isEqualTo("""{"b":5}""")
@@ -933,7 +944,7 @@ class GeneratedAdaptersTest {
       jsonAdapter.fromJson("""{"a":4,"a":4}""")
       fail()
     } catch (expected: JsonDataException) {
-      assertThat(expected).hasMessage("Multiple values for 'a' at $.a")
+      assertThat(expected).hasMessageThat().isEqualTo("Multiple values for 'a' at $.a")
     }
   }
 
@@ -948,7 +959,7 @@ class GeneratedAdaptersTest {
       jsonAdapter.fromJson("""{"a":4,"a":4}""")
       fail()
     } catch (expected: JsonDataException) {
-      assertThat(expected).hasMessage("Multiple values for 'a' at $.a")
+      assertThat(expected).hasMessageThat().isEqualTo("Multiple values for 'a' at $.a")
     }
   }
 
@@ -1180,11 +1191,14 @@ class GeneratedAdaptersTest {
   annotation class Uppercase(val inFrench: Boolean, val onSundays: Boolean = false)
 
   class UppercaseJsonAdapter {
-    @ToJson fun toJson(@Uppercase(inFrench = true) s: String): String {
-      return s.toUpperCase(Locale.US)
+    @ToJson
+    fun toJson(@Uppercase(inFrench = true) s: String): String {
+      return s.uppercase(Locale.US)
     }
-    @FromJson @Uppercase(inFrench = true) fun fromJson(s: String): String {
-      return s.toLowerCase(Locale.US)
+    @FromJson
+    @Uppercase(inFrench = true)
+    fun fromJson(s: String): String {
+      return s.lowercase(Locale.US)
     }
   }
 
@@ -1272,7 +1286,7 @@ class GeneratedAdaptersTest {
       moshi.adapter<CustomGeneratedClassMissing>()
       fail()
     } catch (e: RuntimeException) {
-      assertThat(e).hasMessageContaining("Failed to find the generated JsonAdapter class")
+      assertThat(e).hasMessageThat().contains("Failed to find the generated JsonAdapter class")
     }
   }
 
@@ -1346,10 +1360,11 @@ class GeneratedAdaptersTest {
 
   @Test fun typesSizeCheckMessages_noArgs() {
     try {
+      // Note: This is impossible to do if you use the reified adapter extension!
       moshi.adapter(MultipleGenerics::class.java)
       fail("Should have failed to construct the adapter due to missing generics")
     } catch (e: RuntimeException) {
-      assertThat(e).hasMessage("Failed to find the generated JsonAdapter constructor for 'class com.squareup.moshi.kotlin.codegen.GeneratedAdaptersTest\$MultipleGenerics'. Suspiciously, the type was not parameterized but the target class 'com.squareup.moshi.kotlin.codegen.GeneratedAdaptersTest_MultipleGenericsJsonAdapter' is generic. Consider using Types#newParameterizedType() to define these missing type variables.")
+      assertThat(e).hasMessageThat().isEqualTo("Failed to find the generated JsonAdapter constructor for 'class com.squareup.moshi.kotlin.codegen.GeneratedAdaptersTest\$MultipleGenerics'. Suspiciously, the type was not parameterized but the target class 'com.squareup.moshi.kotlin.codegen.GeneratedAdaptersTest_MultipleGenericsJsonAdapter' is generic. Consider using Types#newParameterizedType() to define these missing type variables.")
     }
   }
 
@@ -1361,13 +1376,43 @@ class GeneratedAdaptersTest {
       )
       fail("Should have failed to construct the adapter due to wrong number of generics")
     } catch (e: IllegalArgumentException) {
-      assertThat(e).hasMessage("TypeVariable mismatch: Expecting 4 types for generic type variables [A, B, C, D], but received 1")
+      assertThat(e).hasMessageThat().isEqualTo("TypeVariable mismatch: Expecting 4 types for generic type variables [A, B, C, D], but received 1")
     }
   }
 
   @JsonClass(generateAdapter = true)
   data class MultipleGenerics<A, B, C, D>(val prop: String)
+
+  @Test fun functionPropertyTypes() {
+    val adapter = moshi.adapter<LambdaTypeNames>()
+    val json = "{\"id\":\"value\"}"
+    assertThat(adapter.fromJson(json)).isEqualTo(LambdaTypeNames("value"))
+  }
+
+  // Regression test for https://github.com/square/moshi/issues/1265
+  @JsonClass(generateAdapter = true)
+  data class LambdaTypeNames(
+    val id: String,
+    @Transient
+    val simple: ((String) -> Boolean)? = null,
+    // Receivers count as the first param, just annotated with a special annotation to indicate it's a receiver
+    @Transient
+    val receiver: (String.(String) -> Boolean)? = null,
+    // Tests that we use `FunctionN` since it has more than 23 params
+    @Transient
+    val arity: (String.(String, String, String, String, String, String, String, String, String, String, String, String, String, String, String, String, String, String, String, String, String, String) -> Boolean)? = null,
+  )
 }
+
+// Regression test for https://github.com/square/moshi/issues/1277
+// Compile-only test
+@JsonClass(generateAdapter = true)
+data class OtherTestModel(val TestModel: TestModel? = null)
+@JsonClass(generateAdapter = true)
+data class TestModel(
+  val someVariable: Int,
+  val anotherVariable: String
+)
 
 // Regression test for https://github.com/square/moshi/issues/1022
 // Compile-only test
@@ -1433,7 +1478,9 @@ data class SmokeTestType(
   val favoriteNullableArrayValues: Array<String?>,
   val nullableSetListMapArrayNullableIntWithDefault: Set<List<Map<String, Array<IntArray?>>>>? = null,
   val aliasedName: TypeAliasName = "Woah",
-  val genericAlias: GenericTypeAlias = listOf("Woah")
+  val genericAlias: GenericTypeAlias = listOf("Woah"),
+  // Regression test for https://github.com/square/moshi/issues/1272
+  val nestedArray: Array<Map<String, Any>>? = null
 )
 
 // Compile only, regression test for https://github.com/square/moshi/issues/848

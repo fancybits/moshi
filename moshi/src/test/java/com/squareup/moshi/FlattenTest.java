@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *    https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,9 +15,10 @@
  */
 package com.squareup.moshi;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.Test;
@@ -280,13 +281,13 @@ public final class FlattenTest {
   }
 
   @Test
-  public void flattenTopLevel() {
+  public void flattenTopLevel() throws IOException {
     JsonWriter writer = factory.newWriter();
     try {
       writer.beginFlatten();
       fail();
     } catch (IllegalStateException e) {
-      assertThat(e).hasMessage("Nesting problem.");
+      assertThat(e).hasMessageThat().isEqualTo("Nesting problem.");
     }
   }
 

@@ -18,24 +18,14 @@ pluginManagement {
   repositories {
     mavenCentral()
     gradlePluginPortal()
-    @Suppress("UnstableApiUsage")
-    exclusiveContent {
-      forRepository {
-        maven {
-          name = "JCenter"
-          setUrl("https://jcenter.bintray.com/")
-        }
-      }
-      filter {
-        includeModule("org.jetbrains.dokka", "dokka-fatjar")
-      }
-    }
   }
 }
 
 rootProject.name = "moshi-root"
 include(":moshi")
+include(":moshi:japicmp")
 include(":adapters")
+include(":adapters:japicmp")
 include(":examples")
 include(":kotlin:reflect")
 include(":kotlin:codegen")

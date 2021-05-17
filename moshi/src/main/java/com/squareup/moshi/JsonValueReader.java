@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *    https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,6 +24,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
+import okio.Buffer;
+import okio.BufferedSource;
 
 /**
  * This class reads a JSON document by traversing a Java object comprising maps, lists, and JSON
@@ -341,6 +343,16 @@ final class JsonValueReader extends JsonReader {
     } else {
       throw new JsonDataException("Expected a value but was " + peek() + " at path " + getPath());
     }
+  }
+
+  @Override
+  public BufferedSource nextSource() throws IOException {
+    Object value = readJsonValue();
+    Buffer result = new Buffer();
+    try (JsonWriter jsonWriter = JsonWriter.of(result)) {
+      jsonWriter.jsonValue(value);
+    }
+    return result;
   }
 
   @Override
