@@ -438,6 +438,11 @@ internal fun TargetProperty.generator(
     return PropertyGenerator(this, DelegateKey(type, emptyList()), true)
   }
 
+  val propertyInfo = propertySpec.tag<ImmutableKmProperty>()
+  if (propertyInfo != null && propertyInfo.fieldSignature == null) {
+    return null // This property does not have a backing field. Ignore it.
+  }
+
   if (!isVisible) {
     messager.printMessage(
       ERROR,
@@ -449,11 +454,6 @@ internal fun TargetProperty.generator(
 
   if (!isSettable) {
     return null // This property is not settable. Ignore it.
-  }
-
-  val propertyInfo = propertySpec.tag<ImmutableKmProperty>()
-  if (propertyInfo != null && propertyInfo.fieldSignature == null) {
-    return null // This property does not have a backing field. Ignore it.
   }
 
   // Merge parameter and property annotations
